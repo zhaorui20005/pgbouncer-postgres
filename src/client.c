@@ -147,7 +147,7 @@ static bool send_client_authreq(PgSocket *client)
 		uint8_t saltlen = 4;
 		get_random_bytes((void *)client->tmp_login_salt, saltlen);
 		SEND_generic(res, client, PqMsg_AuthenticationRequest, "ib", AUTH_REQ_MD5, client->tmp_login_salt, saltlen);
-	} else if (auth_type == AUTH_TYPE_PLAIN || auth_type == AUTH_TYPE_PAM) {
+	} else if (auth_type == AUTH_TYPE_PLAIN || auth_type == AUTH_TYPE_PAM || auth_type == AUTH_TYPE_LDAP) {
 		SEND_generic(res, client, PqMsg_AuthenticationRequest, "i", AUTH_REQ_PASSWORD);
 	} else if (auth_type == AUTH_TYPE_SCRAM_SHA_256) {
 		SEND_generic(res, client, PqMsg_AuthenticationRequest, "iss", AUTH_REQ_SASL, "SCRAM-SHA-256", "");
@@ -378,10 +378,21 @@ static bool finish_set_pool(PgSocket *client, bool takeover)
 			return false;
 		}
 
-		slog_noise(client, "HBA Line %d is matched", rule->hba_linenr);
-
 		auth = rule->rule_method;
+#ifdef HAVE_LDAP
+		if (auth == AUTH_TYPE_LDAP) {
+				snprintf(client->ldap_parameters, MAX_LDAP_CONFIG, "%s", rule->auth_options);
+		}
+#endif
+		slog_noise(client, "HBA Line %d is matched", rule->hba_linenr);
 	}
+
+#ifndef HAVE_LDAP
+	if (auth == AUTH_TYPE_LDAP) {
+		disconnect_client(client, true, "ldap is not supported by this build");
+		return false;
+	}
+#endif
 
 	if (auth == AUTH_TYPE_MD5) {
 		if (get_password_type(client->login_user_credentials->passwd) == PASSWORD_TYPE_SCRAM_SHA_256)
@@ -404,6 +415,7 @@ static bool finish_set_pool(PgSocket *client, bool takeover)
 	case AUTH_TYPE_PLAIN:
 	case AUTH_TYPE_MD5:
 	case AUTH_TYPE_PAM:
+	case AUTH_TYPE_LDAP:
 	case AUTH_TYPE_SCRAM_SHA_256:
 		ok = send_client_authreq(client);
 		break;
@@ -478,6 +490,18 @@ bool check_user_connection_count(PgSocket *client)
 
 	return false;
 }
+#ifdef HAVE_LDAP
+static bool check_if_need_ldap_authentication(PgSocket *client, const char *dbname, const char *username)
+{
+	if (cf_auth_type == AUTH_TYPE_HBA) {
+		struct HBARule *rule = hba_eval(parsed_hba, &client->remote_addr, !!client->sbuf.tls,
+				REPLICATION_NONE, dbname, username);
+		if (rule != NULL && rule->rule_method == AUTH_TYPE_LDAP)
+			return true;
+	}
+	return false;
+}
+#endif
 
 bool set_pool(PgSocket *client, const char *dbname, const char *username, const char *password, bool takeover)
 {
@@ -544,6 +568,24 @@ bool set_pool(PgSocket *client, const char *dbname, const char *username, const 
 		if (!check_user_connection_count(client)) {
 			return false;
 		}
+#ifdef HAVE_LDAP
+	} else if (check_if_need_ldap_authentication(client, dbname, username)) {
+		if (client->db->auth_user_credentials) {
+			slog_error(client, "LDAP can't be used together with database authentication");
+			disconnect_client(client, true, "bouncer config error");
+			return false;
+		}
+		/* Password will be set after successful authentication when not in takeover mode */
+		client->login_user_credentials = find_global_credentials(username);
+		if (!client->login_user_credentials) {
+			slog_error(client, "set_pool(): failed to allocate new LDAP user");
+			disconnect_client(client, true, "bouncer resources exhaustion");
+			return false;
+		}
+		if (!check_user_connection_count(client)) {
+			return false;
+		}
+#endif
 	} else {
 		client->login_user_credentials = find_global_credentials(username);
 
@@ -1292,6 +1334,15 @@ static bool handle_client_startup(PgSocket *client, PktHdr *pkt)
 						return false;
 					}
 					pam_auth_begin(client, passwd);
+					return false;
+				}
+
+				if (client->client_auth_type == AUTH_TYPE_LDAP) {
+					if (!sbuf_pause(&client->sbuf)) {
+						disconnect_client(client, true, "pause failed");
+						return false;
+					}
+					ldap_auth_begin(client, passwd);
 					return false;
 				}
 

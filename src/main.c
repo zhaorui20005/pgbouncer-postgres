@@ -211,6 +211,9 @@ static const struct CfLookup auth_type_map[] = {
 #ifdef HAVE_PAM
 	{ "pam", AUTH_TYPE_PAM },
 #endif
+#ifdef HAVE_LDAP
+	{ "ldap", AUTH_TYPE_LDAP },
+#endif
 	{ "scram-sha-256", AUTH_TYPE_SCRAM_SHA_256 },
 	{ NULL }
 };
@@ -855,6 +858,7 @@ static void main_loop_once(void)
 			log_warning("event_loop failed: %s", strerror(errno));
 	}
 	pam_poll();
+	ldap_poll();
 	per_loop_maint();
 	reuse_just_freed_objects();
 	rescue_timers();
@@ -1120,6 +1124,7 @@ int main(int argc, char *argv[])
 	stats_setup();
 
 	pam_init();
+	auth_ldap_init();
 
 	if (did_takeover) {
 		takeover_finish();
