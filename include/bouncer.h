@@ -229,6 +229,7 @@ enum auth_type {
 	AUTH_TYPE_SCRAM_SHA_256,
 	AUTH_TYPE_PEER,
 	AUTH_TYPE_REJECT,
+	AUTH_TYPE_LDAP,
 };
 
 /* type codes for weird pkts */
