@@ -5,11 +5,8 @@ slapd=/usr/sbin/slapd
 if [ -d '/etc/ldap/schema' ]
 then
 	ldap_schema_dir='/etc/ldap/schema'
-elif [ -d '/etc/openldap/schema' ]
-then
-	ldap_schema_dir='/etc/openldap/schema'
 else
-	ldap_schema_dir='/usr/local/etc/openldap/schema'
+	ldap_schema_dir='/etc/openldap/schema'
 fi
 if [ ! -e $slapd ];then
 	return 77

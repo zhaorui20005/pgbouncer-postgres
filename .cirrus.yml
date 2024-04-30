@@ -169,7 +169,6 @@ task:
   setup_script:
     - pkg install -y autoconf automake bash gmake hs-pandoc libevent libtool pkgconf postgresql12-server postgresql12-contrib python devel/py-pip sudo
     - pip install -r requirements.txt
-    - pkg install -y openldap26-server
     - kldload pf
     - echo 'anchor "pgbouncer_test/*"' >> /etc/pf.conf
     - echo 'pf_enable="YES"' >> /etc/rc.conf
@@ -183,7 +182,7 @@ task:
     M4: /usr/local/bin/gm4
   build_script:
     - su user -c "./autogen.sh"
-    - su user -c "./configure --prefix=$HOME/install --enable-werror --with-ldap"
+    - su user -c "./configure --prefix=$HOME/install --enable-werror"
     - su user -c "gmake -j4"
   test_script:
     - su user -c "gmake -j4 check CONCURRENCY=4"
